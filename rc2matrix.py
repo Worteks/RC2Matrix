@@ -43,6 +43,7 @@ def createArgParser():
     parser.add_argument("-u", type=str, help='Admin username', dest="username", default="admin")
     parser.add_argument("-p", type=str, help='Admin password', dest="password", default="password")
     parser.add_argument("-t", type=str, help='Admin token', dest="token", default=None )
+    parser.add_argument("-a", type=str, help='Application token', dest="apptoken", default=None )
     parser.add_argument("-v", help='verbose', dest="verbose", action="store_true")
 
     return parser
@@ -72,7 +73,7 @@ if __name__ == '__main__':
             exit("failed to connect")
 
     api_headers_admin =  {"Authorization":"Bearer " + args.token}
-    api_headers_as =  {"Authorization":"Bearer secretastoken"}
+    api_headers_as =  {"Authorization":"Bearer " + args.apptoken}
 
     # Rooms
     roomnames = {}
@@ -81,16 +82,37 @@ if __name__ == '__main__':
         for line in jsonfile:
             currentroom = json.loads(line)
             pprint("current room", currentroom)
-            if 'name' in currentroom:
-                roomname=currentroom['name']
-                roomnames[currentroom['_id']] = roomname
-            else:
-                roomname=currentroom['_id']
             api_endpoint = api_base + "_matrix/client/v3/createRoom"
-            api_params = {"visibility": "private", "join_rules": "invite", 'is_direct': 'true', "name": roomname, "room_alias_name": roomname}
+            if currentroom['t'] == 'd': # DM
+                roomname="ZZ-" + "-".join(currentroom['usernames'])
+                api_params = {"visibility": "private", "name": roomname, "join_rules": "invite", 'is_direct': 'true'}
+            elif currentroom['t'] == 'c': # chat
+                roomname=currentroom['name']
+                if 'announcement' in currentroom:
+                    api_params = {"visibility": "public", "name": roomname, "room_alias_name": roomname, 'topic': currentroom['announcement']}
+                else:
+                    api_params = {"visibility": "public", "name": roomname, "room_alias_name": roomname}
+            elif currentroom['t'] == 'p': # private chat
+                roomname=currentroom['name']
+                if 'announcement' in currentroom:
+                    api_params = {"visibility": "private", "join_rules": "invite", "name": roomname, "room_alias_name": roomname, 'topic': currentroom['announcement']}
+                else:
+                    api_params = {"visibility": "private", "join_rules": "invite", "name": roomname, "room_alias_name": roomname}
+            else:
+                exit("Unsupported room type : " + currentroom['t'])
             response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
             vprint(response.json())
-            roomids[currentroom['_id']] = response.json()['room_id']
+            if response.status_code == 200: # created successfully
+                roomids[currentroom['_id']] = response.json()['room_id']
+            elif response.status_code == 400 and response.json()['errcode'] == 'M_ROOM_IN_USE': # already existing
+                api_endpoint = api_base + "/_matrix/client/v3/publicRooms"
+                api_endpoint = api_base + "/_synapse/admin/v1/rooms?search_term=" + roomname
+                #api_params = {"filter": { "generic_search_term": roomname}}
+                response = requests.get(api_endpoint, headers=api_headers_admin)
+                vprint(response.json())
+                roomids[currentroom['_id']] = response.json()['rooms'][0]['room_id']
+            else:
+                exit("Unsupported fail for room creation")
             # rooms.append(json.loads(line))
 
     pprint("room names", roomnames)
@@ -115,6 +137,7 @@ if __name__ == '__main__':
 
 
     # Messages
+    lastts = 0
     with open(args.inputs + histfile, 'r') as jsonfile:
         for line in jsonfile:
             currentmsg = json.loads(line)
@@ -124,22 +147,37 @@ if __name__ == '__main__':
                 tgtuser = "@" + currentmsg['u']['username'] + ":" + args.hostname
                 dateTimeObj = datetime.fromisoformat(currentmsg['ts']['$date'])
                 tgtts = int(dateTimeObj.timestamp()*1000)
-                vprint("should be in room " + str(tgtroom))
-                # /_matrix/client/v3/rooms/{roomId}/join
-                # Join room : invite then join
-                api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/invite'
-                api_params = {'user_id': tgtuser}
-                response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
-                vprint(response.json())
-                api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/join?user_id=' + tgtuser + "&ts=" + str(tgtts)
-                api_params = {'msgtype': 'm.text', 'body': 'b' + currentmsg['msg']}
-                response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
-                vprint(response.json())
+                if tgtts < lastts: # messages are not sorted, bad things will happen
+                    exit("Messages are not sorted, leaving...")
+                lastts = tgtts
+                # vprint("should be in room " + str(tgtroom))
                 # Post message
                 api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
                 api_params = {'msgtype': 'm.text', 'body': currentmsg['msg']}
                 response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
                 vprint(response.json())
+
+                if response.status_code == 403 and response.json()['errcode'] == 'M_FORBIDDEN': # not in the room
+                    # Join room : invite then join
+                    api_endpoint = api_base + "/_synapse/admin/v1/join/" + tgtroom
+                    api_params = {'user_id': tgtuser}
+                    response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
+                    vprint(response.json())
+                    # api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/invite'
+                    # api_params = {'user_id': tgtuser}
+                    # response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
+                    # vprint(response.json())
+                    # api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/join?user_id=' + tgtuser + "&ts=" + str(tgtts)
+                    # api_params = {'msgtype': 'm.text', 'body': 'b' + currentmsg['msg']}
+                    # response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                    # vprint(response.json())
+
+                    # Repost message
+                    api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
+                    api_params = {'msgtype': 'm.text', 'body': currentmsg['msg']}
+                    response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                    vprint(response.json())
+
             else:
                 vprint("not in a room")
 
