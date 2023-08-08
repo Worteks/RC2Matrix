@@ -7,6 +7,7 @@ import pprint as ppprint
 import json
 import requests
 from datetime import datetime
+import re
 
 
 # globals
@@ -48,7 +49,32 @@ def createArgParser():
 
     return parser
 
+def format_message(raw, ancestor=None):
+    if ancestor is not None:
+        return relate_message(raw, ancestor)
 
+    formatted = raw
+    formatted = re.sub("```(.+)```", "<code>\\1</code>", formatted)
+    formatted = re.sub("`(.+)`", "<code>\\1</code>", formatted)
+    if formatted == raw:
+        api_params = {'msgtype': 'm.text', 'body': raw}
+    else:
+        api_params = {'msgtype': 'm.text', 'body': raw,
+            "format": "org.matrix.custom.html",
+            "formatted_body": formatted}
+
+    return api_params
+
+def relate_message(raw, ancestor):
+    api_params = {'msgtype': 'm.text', 'body': raw,
+        "m.relates_to": {
+            "m.in_reply_to": {
+                "event_id": ancestor
+                }
+            }
+        }
+
+    return api_params
 
 if __name__ == '__main__':
     parser = createArgParser()
@@ -153,7 +179,7 @@ if __name__ == '__main__':
                 # vprint("should be in room " + str(tgtroom))
                 # Post message
                 api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
-                api_params = {'msgtype': 'm.text', 'body': currentmsg['msg']}
+                api_params = format_message(currentmsg['msg'])
                 response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
                 vprint(response.json())
 
@@ -174,7 +200,7 @@ if __name__ == '__main__':
 
                     # Repost message
                     api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
-                    api_params = {'msgtype': 'm.text', 'body': currentmsg['msg']}
+                    api_params = format_message(currentmsg['msg'])
                     response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
                     vprint(response.json())
 
@@ -217,3 +243,4 @@ if __name__ == '__main__':
 # }
 
 # room types : https://developer.rocket.chat/reference/api/schema-definition/room
+# message types : https://developer.rocket.chat/reference/api/schema-definition/message
