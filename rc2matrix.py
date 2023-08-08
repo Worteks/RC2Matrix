@@ -6,10 +6,13 @@ import os
 import pprint as ppprint
 import json
 import requests
+from datetime import datetime
+
 
 # globals
 # inputs = "inputs/"
 roomsfile = "rocketchat_room.json"
+usersfile = "users.json"
 histfile = "rocketchat_message.json"
 verbose = False
 
@@ -54,7 +57,7 @@ if __name__ == '__main__':
     if (verbose):
         print("Arguments are: ", args)
 
-    api_base = args.hostname + "/"
+    api_base = "https://" + args.hostname + "/"
     # Connect to matrix
     if args.token is None: # create a token
         api_endpoint = api_base + "_matrix/client/v3/login"
@@ -68,7 +71,8 @@ if __name__ == '__main__':
         else:
             exit("failed to connect")
 
-    api_headers =  {"Authorization":"Bearer " + args.token}
+    api_headers_admin =  {"Authorization":"Bearer " + args.token}
+    api_headers_as =  {"Authorization":"Bearer secretastoken"}
 
     # Rooms
     roomnames = {}
@@ -83,14 +87,31 @@ if __name__ == '__main__':
             else:
                 roomname=currentroom['_id']
             api_endpoint = api_base + "_matrix/client/v3/createRoom"
-            api_params = {"visibility": "public", "name": roomname, "room_alias_name": roomname}
-            response = requests.post(api_endpoint, json=api_params, headers=api_headers)
+            api_params = {"visibility": "private", "join_rules": "invite", 'is_direct': 'true', "name": roomname, "room_alias_name": roomname}
+            response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
             vprint(response.json())
             roomids[currentroom['_id']] = response.json()['room_id']
             # rooms.append(json.loads(line))
 
     pprint("room names", roomnames)
     pprint("room ids", roomids)
+
+    # Users
+    usernames = {}
+    with open(args.inputs + usersfile, 'r') as jsonfile:
+        for line in jsonfile:
+            currentuser = json.loads(line)
+            pprint("current user", currentuser)
+            username=currentuser['username']
+            usernames[currentuser['_id']] = username
+            api_endpoint = api_base + "/_synapse/admin/v2/users/@" + username + ":" + args.hostname
+            vprint(api_endpoint)
+            api_params = {"admin": False}
+            response = requests.put(api_endpoint, json=api_params, headers=api_headers_admin)
+            vprint(response.json())
+
+    pprint("user names", usernames)
+
 
 
     # Messages
@@ -100,10 +121,24 @@ if __name__ == '__main__':
             pprint("current message", currentmsg)
             if currentmsg['rid'] in roomids:
                 tgtroom = roomids[currentmsg['rid']]
+                tgtuser = "@" + currentmsg['u']['username'] + ":" + args.hostname
+                dateTimeObj = datetime.fromisoformat(currentmsg['ts']['$date'])
+                tgtts = int(dateTimeObj.timestamp()*1000)
                 vprint("should be in room " + str(tgtroom))
-                api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?ts=33245444/?ts=33245444'
-                api_params = {'origin_server_ts': '33245554', 'ts': '33245554', 'msgtype': 'm.text', 'body': 'b' + currentmsg['msg']}
-                response = requests.post(api_endpoint, json=api_params, headers=api_headers)
+                # /_matrix/client/v3/rooms/{roomId}/join
+                # Join room : invite then join
+                api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/invite'
+                api_params = {'user_id': tgtuser}
+                response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
+                vprint(response.json())
+                api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/join?user_id=' + tgtuser + "&ts=" + str(tgtts)
+                api_params = {'msgtype': 'm.text', 'body': 'b' + currentmsg['msg']}
+                response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                vprint(response.json())
+                # Post message
+                api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
+                api_params = {'msgtype': 'm.text', 'body': currentmsg['msg']}
+                response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
                 vprint(response.json())
             else:
                 vprint("not in a room")
@@ -142,3 +177,5 @@ if __name__ == '__main__':
 #     "age": 1234
 #   }
 # }
+
+# room types : https://developer.rocket.chat/reference/api/schema-definition/room
