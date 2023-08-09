@@ -166,6 +166,7 @@ if __name__ == '__main__':
 
     # Messages
     lastts = 0
+    idmaps = {}
     with open(args.inputs + histfile, 'r') as jsonfile:
         for line in jsonfile:
             currentmsg = json.loads(line)
@@ -249,10 +250,16 @@ if __name__ == '__main__':
                         elif 'message_link' in attachment: # This is a citation
                             vprint("A citation")
                             html = markdown.markdown(currentmsg['msg'])
+                            related = re.sub(".*\?msg=", "", attachment['message_link'])
                             api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
                             api_params = {'msgtype': 'm.text', 'body': "> <" + attachment['author_name'] + ">" + attachment['text'] + "\n\n" + currentmsg['msg'],
                                 "format": "org.matrix.custom.html",
-                                "formatted_body": "<mx-reply><blockquote>In reply to " + attachment['author_name'] + "<br>" + attachment['text'] + "</blockquote></mx-reply>" + html}
+                                "formatted_body": "<mx-reply><blockquote>In reply to " + attachment['author_name'] + "<br>" + attachment['text'] + "</blockquote></mx-reply>" + html,
+                                "m.relates_to": {
+                                    "m.in_reply_to": {
+                                        "event_id": idmaps[related]
+                                        }
+                                    }}
                             response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
                             vprint(response.json())
                             finished=True
@@ -309,5 +316,7 @@ if __name__ == '__main__':
                     response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
                     vprint(response.json())
 
+                # We keep track of ids to link future references
+                idmaps[currentmsg['_id']]=response.json()['event_id']
             else:
                 vprint("not in a room")
