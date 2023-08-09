@@ -104,6 +104,7 @@ if __name__ == '__main__':
     api_headers_as =  {"Authorization":"Bearer " + args.apptoken}
 
     # Rooms
+    print("Importing rooms...")
     roomnames = {}
     roomids = {}
     with open(args.inputs + roomsfile, 'r') as jsonfile:
@@ -147,6 +148,7 @@ if __name__ == '__main__':
     pprint("room ids", roomids)
 
     # Users
+    print("Importing users...")
     usernames = {}
     with open(args.inputs + usersfile, 'r') as jsonfile:
         for line in jsonfile:
@@ -165,10 +167,16 @@ if __name__ == '__main__':
 
 
     # Messages
+    print("Importing messages...")
+    nblines = 0
+    for line in open(args.inputs + histfile): nblines += 1
     lastts = 0
+    currentline = 0
     idmaps = {}
     with open(args.inputs + histfile, 'r') as jsonfile:
         for line in jsonfile:
+            currentline+=1
+            print("Importing message " + str(currentline) + "/" + str(nblines))
             currentmsg = json.loads(line)
             pprint("current message", currentmsg)
             finished=False
