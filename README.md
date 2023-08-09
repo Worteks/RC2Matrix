@@ -9,10 +9,12 @@ Rocketchat to Matrix/Synapse migration script. Workflow is largely inspired by [
 Currently manually via mongodb. Run the following on the server:
 
 ```shell
-mongoexport --collection=rocketchat_message --db=rocketchat --out=rocketchat_message.json
-mongoexport --collection=rocketchat_room --db=rocketchat --out=rocketchat_room.json
-mongoexport --collection=users --db=rocketchat --out=users.json
+mongoexport --collection=rocketchat_message --db=<dbname> --out=rocketchat_message.json -u <dbuser> -p <dbpass>
+mongoexport --collection=rocketchat_room --db=<dbname> --out=rocketchat_room.json -u <dbuser> -p <dbpass>
+mongoexport --collection=users --db=<dbname> --out=users.json -u <dbuser> -p <dbpass>
 ```
+
+Optionnaly, you can run `./mongofiles_exportall.sh <dbname> <dbuser> <dbpass>` to export files and images (in this repository). It will export files in a temporary directory, printed at the end of the script.
 
 ## Preparing Synapse server
 
@@ -71,6 +73,8 @@ If you do not have your admin token, you can obtain it with `./rc2matrix.py -v -
 
 Then, to import rooms, users and messages into Synapse : `./rc2matrix.py -v -n matrix.jamoa.wsweet.cloud -t <admin_token> -a <ASecretASToken> -i <your folder containing the exports>` (the ASecretASToken is defined in `rc2matrix.yaml`).
 
+In your folder containing the exports, you should have `rocketchat_message.json`, `rocketchat_room.json` and `users.json` files, as well as a folder `files/` containing the exported files.
+
 You can remove `-v` for less verbose output.
 
 ## How it works ?
@@ -81,6 +85,6 @@ On the Synapse side, we use both the [Matrix client-server API](https://spec.mat
 
 First the rooms are created (or retrieved if already existing). Then, users are added, without authentication method : they will have to authenticate through an external system. Finally, messages are posted on behalf of these users. Rooms settings (public, private, DM) should be quite similar to RC settings but there may be some unexpected cases. DM messages appear in dedicated rooms.
 
-This script currently only import messages, in order to provide a usable migration path. Images, threads, emojis and advanced formatting are currently not well handled.
+This script currently only import messages, in order to provide a usable migration path. Images, threads, emojis and advanced formatting is only partially handled.
 
 While the RC data will not be altered (there is just an export), Synapse data will obviously be altered. You should not run this script against an already used server, as it may have unexpected issues. You should run this script against a fresh Synapse server and carefully check the result.
