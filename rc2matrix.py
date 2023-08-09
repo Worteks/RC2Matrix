@@ -185,14 +185,20 @@ if __name__ == '__main__':
                     #files = {'file': open('inputs/files/u5Ga3vn36LCT9bfhW', 'rb')}
                     api_headers_file = api_headers_as
                     api_headers_file['Content-Type'] = currentmsg['file']['type']
-                    with open("inputs/files/" + currentmsg['file']['_id'], 'rb') as f:
-                        response = requests.post(api_endpoint, json=api_params, headers=api_headers_file, data=f)
-                    vprint(response.json())
-                    mxcurl=response.json()['content_uri']
-                    api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
-                    api_params = {'msgtype': 'm.file', 'body': currentmsg['file']['name'], 'url': mxcurl}
-                    response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
-                    vprint(response.json())
+                    try:
+                        with open("inputs/files/" + currentmsg['file']['_id'], 'rb') as f:
+                            response = requests.post(api_endpoint, json=api_params, headers=api_headers_file, data=f)
+                        vprint(response.json())
+                        mxcurl=response.json()['content_uri']
+                        api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
+                        api_params = {'msgtype': 'm.file', 'body': currentmsg['file']['name'], 'url': mxcurl}
+                        response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                        vprint(response.json())
+                    except FileNotFoundError:
+                        api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
+                        api_params = {'msgtype': 'm.text', 'body': "<<< A file named \"" + currentmsg['file']['name'] + "\" was lost during the migration to Matrix >>>"}
+                        response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                        vprint(response.json())
                 else: # standard message
                     api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
                     api_params = format_message(currentmsg['msg'])
