@@ -178,31 +178,47 @@ if __name__ == '__main__':
                 lastts = tgtts
                 # vprint("should be in room " + str(tgtroom))
                 # Post message
-                api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
-                api_params = format_message(currentmsg['msg'])
-                response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
-                vprint(response.json())
-
-                if response.status_code == 403 and response.json()['errcode'] == 'M_FORBIDDEN': # not in the room
-                    # Join room : invite then join
-                    api_endpoint = api_base + "/_synapse/admin/v1/join/" + tgtroom
-                    api_params = {'user_id': tgtuser}
-                    response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
+                if 'file' in currentmsg: # File upload
+                    # "file":{"_id":"u5Ga3vn36LCT9bfhW","name":"tree-736885_640.jpg","type":"image/jpeg"}
+                    api_endpoint = api_base + "/_matrix/media/v3/upload?user_id=" + tgtuser + "&ts=" + str(tgtts)
+                    api_params = {'filename': currentmsg['file']['name']}
+                    #files = {'file': open('inputs/files/u5Ga3vn36LCT9bfhW', 'rb')}
+                    api_headers_file = api_headers_as
+                    api_headers_file['Content-Type'] = currentmsg['file']['type']
+                    with open("inputs/files/" + currentmsg['file']['_id'], 'rb') as f:
+                        response = requests.post(api_endpoint, json=api_params, headers=api_headers_file, data=f)
                     vprint(response.json())
-                    # api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/invite'
-                    # api_params = {'user_id': tgtuser}
-                    # response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
-                    # vprint(response.json())
-                    # api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/join?user_id=' + tgtuser + "&ts=" + str(tgtts)
-                    # api_params = {'msgtype': 'm.text', 'body': 'b' + currentmsg['msg']}
-                    # response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
-                    # vprint(response.json())
-
-                    # Repost message
+                    mxcurl=response.json()['content_uri']
+                    api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
+                    api_params = {'msgtype': 'm.file', 'body': currentmsg['file']['name'], 'url': mxcurl}
+                    response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                    vprint(response.json())
+                else: # standard message
                     api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
                     api_params = format_message(currentmsg['msg'])
                     response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
                     vprint(response.json())
+
+                    if response.status_code == 403 and response.json()['errcode'] == 'M_FORBIDDEN': # not in the room
+                        # Join room : invite then join
+                        api_endpoint = api_base + "/_synapse/admin/v1/join/" + tgtroom
+                        api_params = {'user_id': tgtuser}
+                        response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
+                        vprint(response.json())
+                        # api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/invite'
+                        # api_params = {'user_id': tgtuser}
+                        # response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
+                        # vprint(response.json())
+                        # api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/join?user_id=' + tgtuser + "&ts=" + str(tgtts)
+                        # api_params = {'msgtype': 'm.text', 'body': 'b' + currentmsg['msg']}
+                        # response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                        # vprint(response.json())
+
+                        # Repost message
+                        api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
+                        api_params = format_message(currentmsg['msg'])
+                        response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                        vprint(response.json())
 
             else:
                 vprint("not in a room")
