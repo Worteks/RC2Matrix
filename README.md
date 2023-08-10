@@ -16,6 +16,8 @@ mongoexport --collection=users --db=<dbname> --out=users.json -u <dbuser> -p <db
 
 Optionnaly, you can run `./mongofiles_exportall.sh <dbname> <dbuser> <dbpass>` to export files and images (in this repository). It will export files in a temporary directory, printed at the end of the script.
 
+Instead, you can also run `./mongo_exportpublic.sh <dbname> <dbuser> <dbpass>` to export only public data (all users, public rooms, messages in these public rooms only, attachments mentionned in these messages only).
+
 ## Preparing Synapse server
 
 On the Synapse server you need an admin account (user/pass) or directly its token.
