@@ -199,6 +199,8 @@ if __name__ == '__main__':
                             if 'image_type' in attachment: # we have a content-type
                                 vprint("an image")
                                 api_headers_file['Content-Type'] = attachment['image_type']
+                            # elif 'type' in attachment: # other files with a type
+                            #     api_headers_file['Content-Type'] = attachment['type']
                             try: # try to find the file in the export
                                 localfile=attachment['title_link']
                                 localfile=re.sub("/file-upload/", "", localfile)
