@@ -10,11 +10,17 @@ from datetime import datetime
 import re
 import markdown
 
+# Uncomment to disable ssl verification
+# import ssl
+# ssl._create_default_https_context = ssl._create_unverified_context
+# ssl.SSLContext.verify_mode = property(lambda self: ssl.CERT_NONE, lambda self, newval: None)
+# from urllib3.exceptions import InsecureRequestWarning
+# requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
 # globals
-roomsfile = "rocketchat_room.json"
-usersfile = "users.json"
-histfile = "rocketchat_message.json"
+roomsfile = "rocketchat_rooms.json"
+usersfile = "rocketchat_users.json"
+histfile = "rocketchat_messages.json"
 verbose = False
 
 # pretty printing functions, switched by verbose argument
@@ -47,6 +53,7 @@ def createArgParser():
     parser.add_argument("-p", type=str, help='Admin password', dest="password", default="password")
     parser.add_argument("-t", type=str, help='Admin token', dest="token", default=None )
     parser.add_argument("-a", type=str, help='Application token', dest="apptoken", default=None )
+    parser.add_argument("-s", type=str, help='Starting timestamp (excluded)', dest="startts", default=0 )
     parser.add_argument("-v", help='verbose', dest="verbose", action="store_true")
 
     return parser
@@ -105,6 +112,20 @@ if __name__ == '__main__':
     api_headers_admin =  {"Authorization":"Bearer " + args.token}
     api_headers_as =  {"Authorization":"Bearer " + args.apptoken}
 
+    # Import users
+    print("Importing users...")
+    with open(args.inputs + usersfile, 'r') as jsonfile:
+        # Each line is a JSON representing a RC user
+        for line in jsonfile:
+            currentuser = json.loads(line)
+            pprint("current user", currentuser)
+            username=currentuser['username']
+            # matrix username will be @username:server
+            api_endpoint = api_base + "_synapse/admin/v2/users/@" + username + ":" + args.hostname
+            api_params = {"admin": False}
+            response = requests.put(api_endpoint, json=api_params, headers=api_headers_admin)
+            vprint(response.json())
+
     # Import rooms
     print("Importing rooms...")
     roomids = {}  # Map RC_roomID to Matrix_roomID
@@ -137,8 +158,9 @@ if __name__ == '__main__':
                 roomids[currentroom['_id']] = response.json()['room_id'] # map RC_roomID to Matrix_roomID
             elif response.status_code == 400 and response.json()['errcode'] == 'M_ROOM_IN_USE': # room already existing, we search it
                 #api_endpoint = api_base + "/_matrix/client/v3/publicRooms"
-                api_endpoint = api_base + "/_synapse/admin/v1/rooms?search_term=" + roomname
+                api_endpoint = api_base + "_synapse/admin/v1/rooms?search_term=" + roomname
                 #api_params = {"filter": { "generic_search_term": roomname}}
+                vprint(api_endpoint)
                 response = requests.get(api_endpoint, headers=api_headers_admin)
                 vprint(response.json())
                 roomids[currentroom['_id']] = response.json()['rooms'][0]['room_id'] # map RC_roomID to Matrix_roomID
@@ -146,22 +168,16 @@ if __name__ == '__main__':
                 exit("Unsupported fail for room creation")
             # rooms.append(json.loads(line))
 
+            # Make old owner admin of this new room
+            try:
+                api_endpoint = api_base + "_synapse/admin/v1/rooms/" + roomids[currentroom['_id']] + "/make_room_admin"
+                api_params = {"user_id": "@" + currentroom['u']['username'] + ":" + args.hostname}
+                response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
+                vprint(response.json())
+            except:
+                pass
+
     pprint("room ids", roomids)
-
-    # Import users
-    print("Importing users...")
-    with open(args.inputs + usersfile, 'r') as jsonfile:
-        # Each line is a JSON representing a RC user
-        for line in jsonfile:
-            currentuser = json.loads(line)
-            pprint("current user", currentuser)
-            username=currentuser['username']
-            # matrix username will be @username:server
-            api_endpoint = api_base + "/_synapse/admin/v2/users/@" + username + ":" + args.hostname
-            api_params = {"admin": False}
-            response = requests.put(api_endpoint, json=api_params, headers=api_headers_admin)
-            vprint(response.json())
-
 
     # Messages
     print("Importing messages...")
@@ -175,7 +191,7 @@ if __name__ == '__main__':
         # Each line is a JSON representing a message
         for line in jsonfile:
             currentline+=1
-            print("Importing message " + str(currentline) + "/" + str(nblines))
+            print("Importing message " + str(currentline) + "/" + str(nblines), end='')
             currentmsg = json.loads(line)
             pprint("current message", currentmsg)
             finished=False # set to true to not (re)print the message in the final step
@@ -184,15 +200,20 @@ if __name__ == '__main__':
                 tgtuser = "@" + currentmsg['u']['username'] + ":" + args.hostname # tgtuser is the matrix user
                 dateTimeObj = datetime.fromisoformat(currentmsg['ts']['$date'])
                 tgtts = int(dateTimeObj.timestamp()*1000) # tgtts is the message timestamp
+                if tgtts <= int(args.startts): # skip too old message
+                    print(", timestamp=" + str(tgtts) + ", skipping")
+                    continue
+                print(", timestamp=" + str(tgtts))
                 if tgtts < lastts: # messages are not sorted, bad things will happen
                     exit("Messages are not sorted, leaving...")
                 lastts = tgtts
                 # First, iterate attachments
-                if 'attachments' in currentmsg:
+                # https://developer.rocket.chat/reference/api/rest-api/endpoints/messaging/chat-endpoints/send-message#attachment-field-objects
+                if 'attachments' in currentmsg and hasattr(currentmsg['attachments'], '__iter__'):
                     for attachment in currentmsg['attachments']:
                         if 'type' in attachment and attachment['type'] == 'file': # A file
                             vprint("a file")
-                            api_endpoint = api_base + "/_matrix/media/v3/upload?user_id=" + tgtuser + "&ts=" + str(tgtts)
+                            api_endpoint = api_base + "_matrix/media/v3/upload?user_id=" + tgtuser + "&ts=" + str(tgtts)
                             api_params = {'filename': attachment['title']}
                             #files = {'file': open('inputs/files/u5Ga3vn36LCT9bfhW', 'rb')}
                             api_headers_file = api_headers_as.copy()
@@ -205,7 +226,7 @@ if __name__ == '__main__':
                                 localfile=attachment['title_link']
                                 localfile=re.sub("/file-upload/", "", localfile)
                                 localfile=re.sub("/.*", "", localfile)
-                                with open("inputs/files/" + localfile, 'rb') as f:
+                                with open(args.inputs + "files/" + localfile, 'rb') as f:
                                     # upload as a media to matrix
                                     response = requests.post(api_endpoint, json=api_params, headers=api_headers_file, data=f)
                                 vprint(response.json())
@@ -234,19 +255,31 @@ if __name__ == '__main__':
                             html = markdown.markdown(currentmsg['msg']) # render the markdown
                             related = re.sub(".*\?msg=", "", attachment['message_link']) # find related Matrix_messageID
                             api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
-                            api_params = {'msgtype': 'm.text', 'body': "> <" + attachment['author_name'] + ">" + attachment['text'] + "\n\n" + currentmsg['msg'],
-                                "format": "org.matrix.custom.html",
-                                "formatted_body": "<mx-reply><blockquote>In reply to " + attachment['author_name'] + "<br>" + attachment['text'] + "</blockquote></mx-reply>" + html,
-                                "m.relates_to": {
-                                    "m.in_reply_to": {
-                                        "event_id": idmaps[related]
-                                        }
-                                    }}
+                            if related in idmaps:
+                                api_params = {'msgtype': 'm.text', 'body': "> <" + attachment['author_name'] + ">" + attachment['text'] + "\n\n" + currentmsg['msg'],
+                                    "format": "org.matrix.custom.html",
+                                    "formatted_body": "<mx-reply><blockquote>In reply to " + attachment['author_name'] + "<br>" + attachment['text'] + "</blockquote></mx-reply>" + html,
+                                    "m.relates_to": {
+                                        "m.in_reply_to": {
+                                            "event_id": idmaps[related]
+                                            }
+                                        }}
+                            else:
+                                api_params = {'msgtype': 'm.text', 'body': "> <" + attachment['author_name'] + ">" + attachment['text'] + "\n\n" + currentmsg['msg'],
+                                    "format": "org.matrix.custom.html",
+                                    "formatted_body": "<mx-reply><blockquote>In reply to " + attachment['author_name'] + "<br>" + attachment['text'] + "</blockquote></mx-reply>" + html,
+                                    }
                             response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
                             vprint(response.json())
                             finished=True # do not repost this message in the final step
+                        elif 'image_url' in attachment: # This is an external image
+                            vprint("An external image")
+                            api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
+                            api_params = {'msgtype': 'm.text', 'body': attachment['image_url']}
+                            response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                            vprint(response.json())
                         else:
-                            exit("Unsupported attachment")
+                            exit("Unsupported attachment : " + str(attachment))
 
                 # Finally post the message
                 if currentmsg['msg'] != "" and not finished:
@@ -257,7 +290,7 @@ if __name__ == '__main__':
 
                 if response.status_code == 403 and response.json()['errcode'] == 'M_FORBIDDEN': # not in the room
                     # Join room : invite then join
-                    api_endpoint = api_base + "/_synapse/admin/v1/join/" + tgtroom
+                    api_endpoint = api_base + "_synapse/admin/v1/join/" + tgtroom
                     api_params = {'user_id': tgtuser}
                     response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
                     vprint(response.json())

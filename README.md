@@ -9,9 +9,9 @@ Rocketchat to Matrix/Synapse migration script. Workflow is largely inspired by [
 Currently manually via mongodb. Run the following on the server:
 
 ```shell
-mongoexport --collection=rocketchat_message --db=<dbname> --out=rocketchat_message.json -u <dbuser> -p <dbpass>
-mongoexport --collection=rocketchat_room --db=<dbname> --out=rocketchat_room.json -u <dbuser> -p <dbpass>
-mongoexport --collection=users --db=<dbname> --out=users.json -u <dbuser> -p <dbpass>
+mongoexport --collection=rocketchat_message --db=<dbname> --out=rocketchat_messages.json -u <dbuser> -p <dbpass>  --sort='{ts: 1}'
+mongoexport --collection=rocketchat_room --db=<dbname> --out=rocketchat_rooms.json -u <dbuser> -p <dbpass>
+mongoexport --collection=users --db=<dbname> --out=rocketchat_users.json -u <dbuser> -p <dbpass>
 ```
 
 Optionnaly, you can run `./mongofiles_exportall.sh <dbname> <dbuser> <dbpass>` to export files and images (in this repository). It will export files in a temporary directory, printed at the end of the script.
@@ -73,13 +73,13 @@ namespaces:
 
 If you do not have your admin token, you can obtain it with `./rc2matrix.py -v -n <your matrix hostname> -u <user_admin> -p <pass_admin>`. Token will be printed on the console.
 
-Then, to import rooms, users and messages into Synapse : `./rc2matrix.py -v -n matrix.jamoa.wsweet.cloud -t <admin_token> -a <ASecretASToken> -i <your folder containing the exports>` (the ASecretASToken is defined in `rc2matrix.yaml`).
+Then, to import rooms, users and messages into Synapse : `./rc2matrix.py -v -n <your matrix hostname> -t <admin_token> -a <ASecretASToken> -i <your folder containing the exports>` (the ASecretASToken is defined in `rc2matrix.yaml`).
 
-In your folder containing the exports, you should have `rocketchat_message.json`, `rocketchat_room.json` and `users.json` files, as well as a folder `files/` containing the exported files.
+In your folder containing the exports, you should have `rocketchat_messages.json`, `rocketchat_rooms.json` and `rocketchat_users.json` files, as well as a folder `files/` containing the exported files.
 
 You can remove `-v` for less verbose output.
 
-## How it works ?
+## How does it work ?
 
 First, the data exported from RC is three JSON files containing rooms, users, and messages. Contents are described on the RC website ([rooms](https://developer.rocket.chat/reference/api/schema-definition/room), [messages](https://developer.rocket.chat/reference/api/schema-definition/message)). Files are not really JSON, but each line is a valid JSON, which can thus be processed sequentially.
 
