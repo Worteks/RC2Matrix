@@ -10,7 +10,12 @@ from datetime import datetime
 import re
 import markdown
 import errno
+# for retries
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 
+## TODO
+# Handle topic/announcement/announcementDetails/md of original room
 
 # globals
 roomsfile = "rocketchat_rooms.json"
@@ -130,6 +135,13 @@ if __name__ == '__main__':
     api_headers_admin =  {"Authorization":"Bearer " + args.token}
     api_headers_as =  {"Authorization":"Bearer " + args.apptoken}
 
+    # retry in case of error
+    session = requests.Session()
+    retry = Retry(connect=3, backoff_factor=0.5)
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+
     # Import users
     print("Importing users...")
     users = set()
@@ -158,7 +170,7 @@ if __name__ == '__main__':
             # matrix username will be @username:server
             api_endpoint = api_base + "_synapse/admin/v2/users/@" + username + ":" + args.hostname
             api_params = {"admin": False}
-            response = requests.put(api_endpoint, json=api_params, headers=api_headers_admin)
+            response = session.put(api_endpoint, json=api_params, headers=api_headers_admin)
             if response.status_code < 200 or response.status_code > 299: #2xx
                 print("error adding user")
                 print(currentuser)
@@ -168,6 +180,7 @@ if __name__ == '__main__':
 
             cache.write(username + "\n")
             vprint(response.json())
+    cache.close()
 
     # Import rooms
     print("Importing rooms...")
@@ -212,7 +225,7 @@ if __name__ == '__main__':
                     api_params = {"visibility": "private", "join_rules": "invite", "name": roomname, "room_alias_name": roomname}
             else:
                 exit("Unsupported room type : " + currentroom['t'])
-            response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
+            response = session.post(api_endpoint, json=api_params, headers=api_headers_admin)
             vprint(response.json())
             if response.status_code == 200: # room created successfully
                 roomids[currentroom['_id']] = response.json()['room_id'] # map RC_roomID to Matrix_roomID
@@ -222,7 +235,7 @@ if __name__ == '__main__':
                 api_endpoint = api_base + "_synapse/admin/v1/rooms?search_term=" + roomname
                 #api_params = {"filter": { "generic_search_term": roomname}}
                 vprint(api_endpoint)
-                response = requests.get(api_endpoint, headers=api_headers_admin)
+                response = session.get(api_endpoint, headers=api_headers_admin)
                 if response.status_code != 200:
                     print("error getting room")
                     print("current room", currentroom)
@@ -251,7 +264,7 @@ if __name__ == '__main__':
             try:
                 api_endpoint = api_base + "_synapse/admin/v1/rooms/" + roomids[currentroom['_id']] + "/make_room_admin"
                 api_params = {"user_id": "@" + currentroom['u']['username'] + ":" + args.hostname}
-                response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
+                response = session.post(api_endpoint, json=api_params, headers=api_headers_admin)
                 if response.status_code != 200:
                     print("error setting admin")
                     print("current room", currentroom)
@@ -261,6 +274,7 @@ if __name__ == '__main__':
             except:
                 pass
 
+    cache.close()
     pprint("room ids", roomids)
 
     # Messages
@@ -339,7 +353,7 @@ if __name__ == '__main__':
                                 localfile=re.sub("/.*", "", localfile)
                                 with open(args.inputs + "files/" + localfile, 'rb') as f:
                                     # upload as a media to matrix
-                                    response = requests.post(api_endpoint, json=api_params, headers=api_headers_file, data=f)
+                                    response = session.post(api_endpoint, json=api_params, headers=api_headers_file, data=f)
                                 vprint(response.json())
                                 if response.status_code != 200: # Upload problem
                                     raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), localfile)
@@ -350,10 +364,10 @@ if __name__ == '__main__':
                                     api_params = {'msgtype': 'm.image', 'body': attachment['title'], 'url': mxcurl}
                                 else: # other files
                                     api_params = {'msgtype': 'm.file', 'body': attachment['title'], 'url': mxcurl}
-                                response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                                response = session.post(api_endpoint, json=api_params, headers=api_headers_as)
                                 if response.status_code == 403 and response.json()['errcode'] == 'M_FORBIDDEN': # not in the room
                                     invite(api_base, api_headers_admin, tgtroom, tgtuser)
-                                    response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                                    response = session.post(api_endpoint, json=api_params, headers=api_headers_as)
                                 if response.status_code != 200:
                                     print("error posting attachment")
                                     print(attachment['title'])
@@ -363,10 +377,10 @@ if __name__ == '__main__':
                             except FileNotFoundError: # We do not have the linked attachment
                                 api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
                                 api_params = {'msgtype': 'm.text', 'body': "<<< A file named \"" + attachment['title'] + "\" was lost during the migration to Matrix >>>"}
-                                response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                                response = session.post(api_endpoint, json=api_params, headers=api_headers_as)
                                 if response.status_code == 403 and response.json()['errcode'] == 'M_FORBIDDEN': # not in the room
                                     invite(api_base, api_headers_admin, tgtroom, tgtuser)
-                                    response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                                    response = session.post(api_endpoint, json=api_params, headers=api_headers_as)
                                 if response.status_code != 200:
                                     print("error posting missing attachment")
                                     print(attachment['title'])
@@ -376,10 +390,10 @@ if __name__ == '__main__':
                             if 'description' in attachment: # Matrix does not support descriptions, we post as a message
                                 api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
                                 api_params = {'msgtype': 'm.text', 'body': attachment['description']}
-                                response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                                response = session.post(api_endpoint, json=api_params, headers=api_headers_as)
                                 if response.status_code == 403 and response.json()['errcode'] == 'M_FORBIDDEN': # not in the room
                                     invite(api_base, api_headers_admin, tgtroom, tgtuser)
-                                    response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                                    response = session.post(api_endpoint, json=api_params, headers=api_headers_as)
                                 if response.status_code != 200:
                                     print("error posting description")
                                     print(attachment['description'])
@@ -410,10 +424,10 @@ if __name__ == '__main__':
                                     "format": "org.matrix.custom.html",
                                     "formatted_body": "<mx-reply><blockquote>In reply to " + attachment['author_name'] + "<br>" + attachment['text'] + "</blockquote></mx-reply>" + html,
                                     }
-                            response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                            response = session.post(api_endpoint, json=api_params, headers=api_headers_as)
                             if response.status_code == 403 and response.json()['errcode'] == 'M_FORBIDDEN': # not in the room
                                 invite(api_base, api_headers_admin, tgtroom, tgtuser)
-                                response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                                response = session.post(api_endpoint, json=api_params, headers=api_headers_as)
                             if response.status_code != 200:
                                 print("error posting related")
                                 print(textmsg)
@@ -425,10 +439,10 @@ if __name__ == '__main__':
                             vprint("An external image")
                             api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
                             api_params = {'msgtype': 'm.text', 'body': attachment['image_url']}
-                            response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                            response = session.post(api_endpoint, json=api_params, headers=api_headers_as)
                             if response.status_code == 403 and response.json()['errcode'] == 'M_FORBIDDEN': # not in the room
                                 invite(api_base, api_headers_admin, tgtroom, tgtuser)
-                                response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                                response = session.post(api_endpoint, json=api_params, headers=api_headers_as)
                             if response.status_code != 200:
                                 print("error posting image url")
                                 print(attachment['image_url'])
@@ -443,12 +457,12 @@ if __name__ == '__main__':
                     if currentmsg['msg'] != "" and not finished:
                         api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
                         api_params = format_message(currentmsg['msg'])
-                        response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                        response = session.post(api_endpoint, json=api_params, headers=api_headers_as)
                         vprint(response.json())
 
                         if response.status_code == 403 and response.json()['errcode'] == 'M_FORBIDDEN': # not in the room
                             invite(api_base, api_headers_admin, tgtroom, tgtuser)
-                            response = requests.post(api_endpoint, json=api_params, headers=api_headers_as)
+                            response = session.post(api_endpoint, json=api_params, headers=api_headers_as)
                             vprint(response.json())
 
                         if response.status_code != 200:
@@ -462,3 +476,5 @@ if __name__ == '__main__':
                 cache.write(currentmsg['_id'] + ":" + response.json()['event_id'] + "\n")
             else:
                 exit("not in a room")
+
+    cache.close()
