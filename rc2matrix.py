@@ -11,18 +11,16 @@ import re
 import markdown
 import errno
 
-# Uncomment to disable ssl verification
-# import ssl
-# ssl._create_default_https_context = ssl._create_unverified_context
-# ssl.SSLContext.verify_mode = property(lambda self: ssl.CERT_NONE, lambda self, newval: None)
-# from urllib3.exceptions import InsecureRequestWarning
-# requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
 # globals
 roomsfile = "rocketchat_rooms.json"
 usersfile = "rocketchat_users.json"
 histfile = "rocketchat_messages.json"
 verbose = False
+messages_cachefile = "messages_cache.txt"
+users_cachefile = "users_cache.txt"
+rooms_cachefile = "rooms_cache.txt"
+
 
 # pretty printing functions, switched by verbose argument
 def terminal_size():
@@ -55,6 +53,7 @@ def createArgParser():
     parser.add_argument("-t", type=str, help='Admin token', dest="token", default=None )
     parser.add_argument("-a", type=str, help='Application token', dest="apptoken", default=None )
     parser.add_argument("-s", type=str, help='Starting timestamp (excluded)', dest="startts", default=0 )
+    parser.add_argument("-k", help='Disable TLS certificate check', dest="nocertcheck", action="store_true")
     parser.add_argument("-v", help='verbose', dest="verbose", action="store_true")
 
     return parser
@@ -105,6 +104,13 @@ if __name__ == '__main__':
     if (verbose):
         print("Arguments are: ", args)
 
+    if (args.nocertcheck):
+        import ssl
+        ssl._create_default_https_context = ssl._create_unverified_context
+        ssl.SSLContext.verify_mode = property(lambda self: ssl.CERT_NONE, lambda self, newval: None)
+        from urllib3.exceptions import InsecureRequestWarning
+        requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
+
     api_base = "https://" + args.hostname + "/"
 
     # Obtain an admin token if not provided
@@ -126,12 +132,29 @@ if __name__ == '__main__':
 
     # Import users
     print("Importing users...")
+    users = set()
+    # load cache
+    nbcache = 0
+    try:
+        with open(users_cachefile, encoding='utf8') as f:
+            for line in f:
+                nbcache+=1
+                users.add(line.rstrip('\n'))
+        f.close()
+        print("Restored " + str(nbcache) + " user ids from cache")
+    except FileNotFoundError:
+        print("No user cache to restore")
+    cache = open(users_cachefile, 'a')
+    # import new users
     with open(args.inputs + usersfile, 'r') as jsonfile:
         # Each line is a JSON representing a RC user
         for line in jsonfile:
             currentuser = json.loads(line)
             pprint("current user", currentuser)
             username=currentuser['username']
+            if username in users:
+                print("user " + username + " already processed (in cache), skipping")
+                continue
             # matrix username will be @username:server
             api_endpoint = api_base + "_synapse/admin/v2/users/@" + username + ":" + args.hostname
             api_params = {"admin": False}
@@ -143,15 +166,33 @@ if __name__ == '__main__':
                 print(response.status_code)
                 exit(1)
 
+            cache.write(username + "\n")
             vprint(response.json())
 
     # Import rooms
     print("Importing rooms...")
     roomids = {}  # Map RC_roomID to Matrix_roomID
+    # load cache
+    nbcache = 0
+    try:
+        with open(rooms_cachefile, encoding='utf8') as f:
+            for line in f:
+                nbcache+=1
+                atoms = line.rstrip('\n').split('$')
+                roomids[atoms[0]] = atoms[1]
+        f.close()
+        print("Restored " + str(nbcache) + " room ids from cache")
+    except FileNotFoundError:
+        print("No room cache to restore")
+    cache = open(rooms_cachefile, 'a')
+    # Import new rooms
     with open(args.inputs + roomsfile, 'r') as jsonfile:
         # Each line is a JSON representing a RC room
         for line in jsonfile:
             currentroom = json.loads(line)
+            if currentroom['_id'] in roomids:
+                print("room " + currentroom['name'] + " already processed (in cache), skipping")
+                continue
             pprint("current room", currentroom)
             api_endpoint = api_base + "_matrix/client/v3/createRoom"
             if currentroom['t'] == 'd': # DM, create a private chatroom
@@ -175,6 +216,7 @@ if __name__ == '__main__':
             vprint(response.json())
             if response.status_code == 200: # room created successfully
                 roomids[currentroom['_id']] = response.json()['room_id'] # map RC_roomID to Matrix_roomID
+                cache.write(currentroom['_id'] + "$" + response.json()['room_id'] + "\n")
             elif response.status_code == 400 and response.json()['errcode'] == 'M_ROOM_IN_USE': # room already existing, we search it
                 #api_endpoint = api_base + "/_matrix/client/v3/publicRooms"
                 api_endpoint = api_base + "_synapse/admin/v1/rooms?search_term=" + roomname
@@ -192,6 +234,7 @@ if __name__ == '__main__':
                     if room['name'] == roomname:
                         found = True
                         roomids[currentroom['_id']] = room['room_id'] # map RC_roomID to Matrix_roomID
+                        cache.write(currentroom['_id'] + "$" + room['room_id'] + "\n")
                 if not found:
                     print("error finding room")
                     print("current room", currentroom)
@@ -228,6 +271,24 @@ if __name__ == '__main__':
     lastts = 0 # last seen timestamp, to check that messages are chronologically sorted
     currentline = 0 # current read line
     idmaps = {} # map RC_messageID to Matrix_messageID for threads, replies, ...
+
+    # load cache
+    nbcache = 0
+    try:
+        with open(messages_cachefile, encoding='utf8') as f:
+            for line in f:
+                nbcache+=1
+                atoms = line.rstrip('\n').split(':')
+                idmaps[atoms[0]] = atoms[1]
+        f.close()
+        print("Restored " + str(nbcache) + " message ids from cache")
+    except FileNotFoundError:
+        print("No message cache to restore")
+    cache = open(messages_cachefile, 'a')
+
+    # print(idmaps)
+    # exit(1)
+
     with open(args.inputs + histfile, 'r') as jsonfile:
         # Each line is a JSON representing a message
         for line in jsonfile:
@@ -243,6 +304,9 @@ if __name__ == '__main__':
                 tgtts = int(dateTimeObj.timestamp()*1000) # tgtts is the message timestamp
                 if tgtts <= int(args.startts): # skip too old message
                     print(", timestamp=" + str(tgtts) + ", skipping")
+                    continue
+                if currentmsg['_id'] in idmaps:
+                    print(", already processed (in cache), skipping")
                     continue
                 print(", timestamp=" + str(tgtts))
                 if tgtts < lastts: # messages are not sorted, bad things will happen
@@ -395,5 +459,6 @@ if __name__ == '__main__':
 
                 # We keep track of messageIDs to link future references
                 idmaps[currentmsg['_id']]=response.json()['event_id']
+                cache.write(currentmsg['_id'] + ":" + response.json()['event_id'] + "\n")
             else:
                 exit("not in a room")
