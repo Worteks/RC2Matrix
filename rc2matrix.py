@@ -406,7 +406,7 @@ if __name__ == '__main__':
                         elif 'message_link' in attachment: # This is a citation
                             vprint("A citation")
                             if 'msg' in currentmsg:
-                                textmsg = currentmsg['msg']
+                                textmsg = emoji.emojize(currentmsg['msg'], language='alias')
                             else:
                                 textmsg = ""
                             html = markdown.markdown(textmsg) # render the markdown
@@ -458,7 +458,7 @@ if __name__ == '__main__':
                 if 'msg' in currentmsg:
                     if currentmsg['msg'] != "" and not finished:
                         api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.room.message?user_id=' + tgtuser + "&ts=" + str(tgtts) # ts, ?user_id=@_irc_user:example.org
-                        api_params = format_message(currentmsg['msg'])
+                        api_params = format_message(emoji.emojize(currentmsg['msg'], language='alias'))
                         response = session.post(api_endpoint, json=api_params, headers=api_headers_as)
                         vprint(response.json())
 
