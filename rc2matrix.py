@@ -313,6 +313,7 @@ if __name__ == '__main__':
             currentmsg = json.loads(line)
             pprint("current message", currentmsg)
             finished=False # set to true to not (re)print the message in the final step
+            response=None
             if currentmsg['rid'] in roomids:
                 tgtroom = roomids[currentmsg['rid']] # tgtroom is the matrix room
                 tgtuser = "@" + currentmsg['u']['username'] + ":" + args.hostname # tgtuser is the matrix user
@@ -333,6 +334,11 @@ if __name__ == '__main__':
                 if 't' in currentmsg and currentmsg['t']=="message_pinned":
                     print(", timestamp=" + str(tgtts) + ", message pinning event, skipping")
                     continue
+
+                # Jitsi start messages, unhandled
+                if 't' in currentmsg and currentmsg['t']=="jitsi_call_started":
+                   print(", timestamp=" + str(tgtts) + ", jitsi_call event, skipping")
+                   continue
 
                 # First, iterate attachments
                 # https://developer.rocket.chat/reference/api/rest-api/endpoints/messaging/chat-endpoints/send-message#attachment-field-objects
@@ -474,8 +480,12 @@ if __name__ == '__main__':
                             exit(1)
 
                 # We keep track of messageIDs to link future references
-                idmaps[currentmsg['_id']]=response.json()['event_id']
-                cache.write(currentmsg['_id'] + ":" + response.json()['event_id'] + "\n")
+                if response is not None: # is None if no message has been posted, nothing to keep in idmaps in this case
+                    idmaps[currentmsg['_id']]=response.json()['event_id']
+                    cache.write(currentmsg['_id'] + ":" + response.json()['event_id'] + "\n")
+                else:
+                    vprint("No response to get an event_id from")
+                    continue
 
                 if 'reactions' in currentmsg:
                     for reaction in currentmsg['reactions']:
