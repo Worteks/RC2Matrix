@@ -14,6 +14,8 @@ import errno
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
+import emoji # for reactions
+
 ## TODO
 # Handle topic/announcement/announcementDetails/md of original room
 
@@ -474,6 +476,21 @@ if __name__ == '__main__':
                 # We keep track of messageIDs to link future references
                 idmaps[currentmsg['_id']]=response.json()['event_id']
                 cache.write(currentmsg['_id'] + ":" + response.json()['event_id'] + "\n")
+
+                if 'reactions' in currentmsg:
+                    for reaction in currentmsg['reactions']:
+                        tgtreaction = emoji.emojize(reaction, language='alias')
+                        for username in currentmsg['reactions'][reaction]['usernames']:
+                            tgtusername = "@" + username + ":" + args.hostname
+                            vprint(tgtusername + ":" + tgtreaction)
+                            api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + '/send/m.reaction?user_id=' + tgtusername + "&ts=" + str(tgtts)
+                            api_params = {"m.relates_to": {
+                                                "event_id": idmaps[currentmsg['_id']],
+                                                "key": tgtreaction,
+                                                "rel_type": "m.annotation"
+                                                }}
+                            response = session.post(api_endpoint, json=api_params, headers=api_headers_as)
+                            vprint(response.json())
             else:
                 exit("not in a room")
 
