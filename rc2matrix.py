@@ -166,12 +166,16 @@ if __name__ == '__main__':
             currentuser = json.loads(line)
             pprint("current user", currentuser)
             username=currentuser['username']
+            if "name" in currentuser:
+                displayname=currentuser['name']
+            else:
+                displayname=username
             if username in users:
                 print("user " + username + " already processed (in cache), skipping")
                 continue
             # matrix username will be @username:server
             api_endpoint = api_base + "_synapse/admin/v2/users/@" + username + ":" + args.hostname
-            api_params = {"admin": False}
+            api_params = {"admin": False, "displayname": displayname}
             response = session.put(api_endpoint, json=api_params, headers=api_headers_admin)
             if response.status_code < 200 or response.status_code > 299: #2xx
                 print("error adding user")
@@ -246,7 +250,7 @@ if __name__ == '__main__':
                 vprint(response.json())
                 found = False
                 for room in response.json()['rooms']:
-                    if room['name'] == roomname:
+                    if room['name'].lower() == roomname.lower():
                         found = True
                         roomids[currentroom['_id']] = room['room_id'] # map RC_roomID to Matrix_roomID
                         cache.write(currentroom['_id'] + "$" + room['room_id'] + "\n")
