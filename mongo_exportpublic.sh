@@ -50,5 +50,42 @@ done < ../rocketchat_messages.json
 #   mongofiles -u ${user} -p ${pass} --db=${dbname} --prefix=rocketchat_uploads get ${i}
 # done
 
+echo -e "\nExporting users' avatars...\n"
+cd ..
+mkdir -p avatars_users
+cd avatars_users
+for avatar_user in $(cat ../rocketchat_users.json | grep -o -e '"username":"[^"]*"' | sort | uniq | cut -d ':' -f2 | sed "s/\"//g"); do
+  avatar_etag=$(mongosh -u ${user} -p ${pass} ${dbname} --eval "db.users.find({'username': \"$avatar_user\"})" | grep avatarETag)
+  if [ -n "$avatar_etag" ]; then
+    avatar_etag=$(echo ${avatar_etag} | cut -d ':' -f 2 | sed "s/[ \',]//g")
+    echo $avatar_etag
+    avatar_url=$(mongosh -u ${user} -p ${pass} ${dbname} --eval "db.rocketchat_avatars.find({'etag': \"$avatar_etag\"})" | grep path)
+    echo $avatar_url
+    avatar_id=$(echo ${avatar_url} | cut -d ':' -f 3 | sed "s/[ \',]//g" | cut -d '/' -f2)
+    echo $avatar_id
+    mongofiles -u ${user} -p ${pass} --db=${dbname} --prefix=rocketchat_avatars --local="$avatar_etag" get ${avatar_id} # --local="${avatar_user}"
+  fi
+done
+
+echo -e "\nExporting rooms' avatars...\n"
+cd ..
+mkdir -p avatars_rooms
+cd avatars_rooms
+for avatar_room in $(cat ../rocketchat_rooms.json | grep -o -e '"name":"[^"]*"' | sort | uniq | cut -d ':' -f2 | sed "s/\"//g"); do
+  avatar_etag=$(mongosh -u ${user} -p ${pass} ${dbname} --eval "db.rocketchat_room.find({'name': \"$avatar_room\"})" | grep avatarETag)
+  if [ -n "$avatar_etag" ]; then
+    avatar_etag=$(echo ${avatar_etag} | cut -d ':' -f 2 | sed "s/[ \',]//g")
+    echo $avatar_etag
+    avatar_url=$(mongosh -u ${user} -p ${pass} ${dbname} --eval "db.rocketchat_avatars.find({'etag': \"$avatar_etag\"})" | grep path)
+    echo $avatar_url
+    avatar_id=$(echo ${avatar_url} | cut -d ':' -f 3 | sed "s/[ \',]//g" | cut -d '/' -f2)
+    echo $avatar_id
+    mongofiles -u ${user} -p ${pass} --db=${dbname} --prefix=rocketchat_avatars --local="$avatar_etag" get ${avatar_id} # --local="${avatar_room}"
+  fi
+done
+
+
+
+
 # Print output directory
 echo "Exported to ${output}"

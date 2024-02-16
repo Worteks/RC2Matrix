@@ -13,6 +13,7 @@ import errno
 # for retries
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
+import magic
 
 import emoji # for reactions
 
@@ -107,6 +108,7 @@ if __name__ == '__main__':
     parser = createArgParser()
     args = parser.parse_args()
     verbose = args.verbose
+    mime = magic.Magic(mime=True)
 
     if (verbose):
         print("Arguments are: ", args)
@@ -166,7 +168,7 @@ if __name__ == '__main__':
             currentuser = json.loads(line)
             pprint("current user", currentuser)
             username=currentuser['username']
-            if "name" in currentuser:
+            if "name" in currentuser and isinstance(currentuser['name'], str):
                 displayname=currentuser['name']
             else:
                 displayname=username
@@ -183,6 +185,37 @@ if __name__ == '__main__':
                 print(response.json())
                 print(response.status_code)
                 exit(1)
+
+            # avatar
+            if "avatarETag" in currentuser:
+                try: # try to find the file in the export
+                    api_endpoint = api_base + "_matrix/media/v3/upload?user_id=@" + username + ":" + args.hostname
+                    api_params = {'filename': username}
+                    api_headers_file = api_headers_as.copy()
+                    # api_headers_file['Content-Type'] = attachment['image_type']
+                    localfile=currentuser["avatarETag"]
+                    with open(args.inputs + "avatars_users/" + localfile, 'rb') as f:
+                        # upload as a media to matrix
+                        api_headers_file['Content-Type'] = mime.from_file(args.inputs + "avatars_users/" + localfile)
+                        response = session.post(api_endpoint, json=api_params, headers=api_headers_file, data=f)
+                    vprint(response.json())
+                    if response.status_code != 200: # Upload problem
+                        vprint(response)
+                        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), localfile)
+                    mxcurl=response.json()['content_uri'] # URI of the uploaded media
+                    # Then post a user update referencing this media
+                    api_endpoint = api_base + "_synapse/admin/v2/users/@" + username + ":" + args.hostname
+                    api_params = {"admin": False, "avatar_url": mxcurl}
+                    response = session.put(api_endpoint, json=api_params, headers=api_headers_admin)
+                    if response.status_code < 200 or response.status_code > 299: #2xx
+                        print("error adding avatar for user")
+                        print(currentuser)
+                        print(response.json())
+                        print(response.status_code)
+                        exit(1)
+
+                except FileNotFoundError: # We do not have the linked attachment
+                    print("Avatar not found for " + username + ", in " + localfile)
 
             cache.write(username + "\n")
             vprint(response.json())
@@ -279,6 +312,38 @@ if __name__ == '__main__':
                 vprint(response.json())
             except:
                 pass
+
+            # avatar
+            if "avatarETag" in currentroom:
+                try: # try to find the file in the export
+                    api_endpoint = api_base + "_matrix/media/v3/upload?user_id=@" + currentroom['u']['username'] + ":" + args.hostname
+                    api_params = {'filename': roomids[currentroom['_id']]}
+                    api_headers_file = api_headers_as.copy()
+                    # api_headers_file['Content-Type'] = attachment['image_type']
+                    localfile=currentroom["avatarETag"]
+                    with open(args.inputs + "avatars_rooms/" + localfile, 'rb') as f:
+                        # upload as a media to matrix
+                        api_headers_file['Content-Type'] = mime.from_file(args.inputs + "avatars_rooms/" + localfile)
+                        response = session.post(api_endpoint, json=api_params, headers=api_headers_file, data=f)
+                    vprint(response.json())
+                    if response.status_code != 200: # Upload problem
+                        vprint(response)
+                        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), localfile)
+                    mxcurl=response.json()['content_uri'] # URI of the uploaded media
+                    # Then post a room update referencing this media
+                    api_endpoint = api_base + "_matrix/client/v3/rooms/" + roomids[currentroom['_id']] + '/state/m.room.avatar/?user_id=@' + currentroom['u']['username'] + ":" + args.hostname
+                    api_params = {"url": mxcurl}
+                    response = session.put(api_endpoint, json=api_params, headers=api_headers_as)
+                    vprint(response.json())
+                    if response.status_code < 200 or response.status_code > 299: #2xx
+                        print("error adding avatar for room")
+                        print(currentroom)
+                        print(response.json())
+                        print(response.status_code)
+                        exit(1)
+
+                except FileNotFoundError: # We do not have the linked attachment
+                    print("Avatar not found for " + roomname + ", in " + localfile)
 
     cache.close()
     pprint("room ids", roomids)
