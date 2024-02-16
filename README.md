@@ -6,7 +6,9 @@ Rocketchat to Matrix/Synapse migration script. Workflow is largely inspired by [
 
 ## Exporting RocketChat data
 
-Currently manually via mongodb. Run the following on the server:
+Currently, only public data should be exported. `./mongo_exportpublic.sh <dbname> <dbuser> <dbpass>` must be run on the mongo server and will use mongoexport, mongosh and mongofiles to extract necessary data (all users, public rooms, messages in these public rooms only, attachments mentionned in these messages only, avatars of rooms and users).
+
+Exporting private data (private chats, DMs) can be manually done via mongodb. Run the following on the server:
 
 ```shell
 mongoexport --collection=rocketchat_message --db=<dbname> --out=rocketchat_messages.json -u <dbuser> -p <dbpass>  --sort='{ts: 1}'
@@ -14,15 +16,16 @@ mongoexport --collection=rocketchat_room --db=<dbname> --out=rocketchat_rooms.js
 mongoexport --collection=users --db=<dbname> --out=rocketchat_users.json -u <dbuser> -p <dbpass>
 ```
 
-Optionnaly, you can run `./mongofiles_exportall.sh <dbname> <dbuser> <dbpass>` to export files and images (in this repository). It will export files in a temporary directory, printed at the end of the script.
+Optionnaly, if you manually extracted private data, you can run `./mongofiles_exportall.sh <dbname> <dbuser> <dbpass>` to export files and images. It will export files in a temporary directory, printed at the end of the script. This part is automatically done for public data during `mongo_exportpublic.sh`.
 
-Instead, you can also run `./mongo_exportpublic.sh <dbname> <dbuser> <dbpass>` to export only public data (all users, public rooms, messages in these public rooms only, attachments mentionned in these messages only).
+Please note that current features are only tested with the `mongo_exportpublic.sh` script focusing only on public data. Although most of the migration steps should also work with private data, it is currenlty not tested nor used.
+
 
 ## Preparing Synapse server
 
 On the Synapse server you need an admin account (user/pass) or directly its token.
 
-You also need an application service. To register an application service, add in `homeserver.yaml` :
+You also need an application service. To register an application service, add the following to `homeserver.yaml` :
 ```YAML
 app_service_config_files:
 - /your_path/rc2matrix.yaml
@@ -49,7 +52,7 @@ rc_invites:
     burst_count: 2048
 ```
 
-And to create a `rc2matrix.yaml` (you need to customize the two tokens) :
+You also need to create a `rc2matrix.yaml` (you need to customize the two tokens) :
 ```YAML
 url: null
 as_token: ASecretASToken
@@ -77,7 +80,7 @@ Then, to import rooms, users and messages into Synapse : `./rc2matrix.py -v -n <
 
 In your folder containing the exports, you should have `rocketchat_messages.json`, `rocketchat_rooms.json` and `rocketchat_users.json` files, as well as a folder `files/` containing the exported files.
 
-You can remove `-v` for less verbose output.
+You can remove `-v` for less verbose output, or add `-k` to not check certificates.
 
 ## How does it work ?
 
@@ -87,6 +90,6 @@ On the Synapse side, we use both the [Matrix client-server API](https://spec.mat
 
 First the rooms are created (or retrieved if already existing). Then, users are added, without authentication method : they will have to authenticate through an external system. Finally, messages are posted on behalf of these users. Rooms settings (public, private, DM) should be quite similar to RC settings but there may be some unexpected cases. DM messages appear in dedicated rooms.
 
-This script currently only import messages, in order to provide a usable migration path. Images, threads, emojis and advanced formatting is only partially handled.
+This script currently imports messages, threads, reactions, emojis and avatars in order to provide a usable migration path. Advanced formatting is only partially handled.
 
 While the RC data will not be altered (there is just an export), Synapse data will obviously be altered. You should not run this script against an already used server, as it may have unexpected issues. You should run this script against a fresh Synapse server and carefully check the result.
