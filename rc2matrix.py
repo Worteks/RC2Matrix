@@ -167,7 +167,9 @@ if __name__ == '__main__':
         for line in jsonfile:
             currentuser = json.loads(line)
             pprint("current user", currentuser)
-            username=currentuser['username']
+            if ("username" not in currentuser):
+                continue
+            username=currentuser['username'].lower()
             if "name" in currentuser and isinstance(currentuser['name'], str):
                 displayname=currentuser['name']
             else:
@@ -331,6 +333,7 @@ if __name__ == '__main__':
                         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), localfile)
                     mxcurl=response.json()['content_uri'] # URI of the uploaded media
                     # Then post a room update referencing this media
+                    invite(api_base, api_headers_admin, roomids[currentroom['_id']], '@' + currentroom['u']['username'] + ":" + args.hostname)
                     api_endpoint = api_base + "_matrix/client/v3/rooms/" + roomids[currentroom['_id']] + '/state/m.room.avatar/?user_id=@' + currentroom['u']['username'] + ":" + args.hostname
                     api_params = {"url": mxcurl}
                     response = session.put(api_endpoint, json=api_params, headers=api_headers_as)
