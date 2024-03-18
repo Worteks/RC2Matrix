@@ -55,9 +55,10 @@ cd ..
 mkdir -p avatars_users
 cd avatars_users
 for avatar_user in $(cat ../rocketchat_users.json | grep -o -e '"username":"[^"]*"' | sort | uniq | cut -d ':' -f2 | sed "s/\"//g"); do
-  avatar_etag=$(mongosh -u ${user} -p ${pass} ${dbname} --eval "db.users.find({'username': \"$avatar_user\"})" | grep avatarETag)
+  #avatar_etag=$(mongosh -u ${user} -p ${pass} ${dbname} --eval "db.users.find({'username': \"$avatar_user\"})" | grep avatarETag)
+  avatar_etag=$(grep "\"username\":\"${avatar_user}\"" ../rocketchat_users.json | grep -o -e '"avatarETag":"[^"]*"' | sort | uniq | cut -d ':' -f2 | sed "s/\"//g")
   if [ -n "$avatar_etag" ]; then
-    avatar_etag=$(echo ${avatar_etag} | cut -d ':' -f 2 | sed "s/[ \',]//g")
+    #avatar_etag=$(echo ${avatar_etag} | cut -d ':' -f 2 | sed "s/[ \',]//g")
     echo $avatar_etag
     avatar_url=$(mongosh -u ${user} -p ${pass} ${dbname} --eval "db.rocketchat_avatars.find({'etag': \"$avatar_etag\"})" | grep path)
     echo $avatar_url
