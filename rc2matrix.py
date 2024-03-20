@@ -248,6 +248,27 @@ if __name__ == '__main__':
                 print("room " + currentroom['name'] + " already processed (in cache), skipping")
                 continue
             pprint("current room", currentroom)
+
+            api_headers_create = api_headers_admin
+            createroom_usertoken = False
+            if 'u' in currentroom:
+                try:
+                    owner_id = "@" + currentroom['u']['username'] + ":" + args.hostname
+                    api_endpoint = api_base + "_synapse/admin/v2/users/" + owner_id
+                    vprint(api_endpoint)
+                    response = session.get(api_endpoint, headers=api_headers_admin)
+                    vprint(response.json())
+                    if not 'errcode' in response.json():
+                        api_endpoint = api_base + "_synapse/admin/v1/users/" + owner_id + "/login"
+                        response = session.post(api_endpoint, headers=api_headers_admin)
+                        vprint(response.json())
+                        owner_token = response.json()['access_token']
+                        api_headers_create =  {"Authorization":"Bearer " + owner_token}
+                        vprint(api_headers_create)
+                        createroom_usertoken = True
+                except:
+                    pass
+
             api_endpoint = api_base + "_matrix/client/v3/createRoom"
             if currentroom['t'] == 'd': # DM, create a private chatroom
                 roomname="ZZ-" + "-".join(currentroom['usernames'])
@@ -266,8 +287,11 @@ if __name__ == '__main__':
                     api_params = {"visibility": "private", "join_rules": "invite", "name": roomname, "room_alias_name": roomname}
             else:
                 exit("Unsupported room type : " + currentroom['t'])
-            response = session.post(api_endpoint, json=api_params, headers=api_headers_admin)
+            response = session.post(api_endpoint, json=api_params, headers=api_headers_create)
             vprint(response.json())
+            if createroom_usertoken:
+                api_endpoint_logout = api_base + "/_matrix/client/v3/logout"
+                response_logout = session.post(api_endpoint_logout, headers=api_headers_create)
             if response.status_code == 200: # room created successfully
                 roomids[currentroom['_id']] = response.json()['room_id'] # map RC_roomID to Matrix_roomID
                 cache.write(currentroom['_id'] + "$" + response.json()['room_id'] + "\n")
