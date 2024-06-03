@@ -94,15 +94,62 @@ def relate_message(raw, ancestor):
     return api_params
 
 def invite(api_base, api_headers_admin, tgtroom, tgtuser):
-    # Join room : invite then join
+
+    # Method 1, use admin user (possible for public rooms)
     api_endpoint = api_base + "_synapse/admin/v1/join/" + tgtroom
     api_params = {'user_id': tgtuser}
     response = requests.post(api_endpoint, json=api_params, headers=api_headers_admin)
-    if response.status_code != 200:
-        print("error inviting " + tgtuser + " to " + tgtroom)
-        print(response.json())
-        exit(1)
     vprint(response.json())
+
+    if response.status_code != 200:
+        # Method 2, use creator for private rooms : get creator's token, use it to invite, join with tgtuser, logout both
+
+        # Get creator and its token
+        ## Get creator
+        api_endpoint = api_base + "/_synapse/admin/v1/rooms/" + tgtroom
+        response = requests.get(api_endpoint, headers=api_headers_admin)
+        vprint(response.json())
+        creator=response.json()["creator"]
+
+        ## Get its token
+        api_endpoint = api_base + "_synapse/admin/v1/users/" + creator + "/login"
+        response = session.post(api_endpoint, headers=api_headers_admin)
+        vprint(response.json())
+        creator_token = response.json()['access_token']
+        api_headers_creator =  {"Authorization":"Bearer " + creator_token}
+        vprint(api_headers_creator)
+
+        # invite tgtuser with creator's token
+        api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + "/invite"
+        api_params = {'user_id': tgtuser}
+        response = requests.post(api_endpoint, json=api_params, headers=api_headers_creator)
+        vprint(response.json())
+
+        # Logout creator
+        api_endpoint_logout = api_base + "/_matrix/client/v3/logout"
+        response_logout = requests.post(api_endpoint_logout, headers=api_headers_creator)
+
+        # join with tgtuser
+        api_endpoint = api_base + "_synapse/admin/v1/users/" + tgtuser + "/login"
+        response = session.post(api_endpoint, headers=api_headers_admin)
+        vprint(response.json())
+        tgtuser_token = response.json()['access_token']
+        api_headers_tgtuser =  {"Authorization":"Bearer " + tgtuser_token}
+        vprint(api_headers_tgtuser)
+        api_endpoint = api_base + "_matrix/client/v3/rooms/" + tgtroom + "/join"
+        response = requests.post(api_endpoint, headers=api_headers_tgtuser)
+        vprint(response.json())
+
+        # logout tgtuser
+        api_endpoint_logout = api_base + "/_matrix/client/v3/logout"
+        response_logout = requests.post(api_endpoint_logout, headers=api_headers_tgtuser)
+
+        # Check join
+        if response.status_code != 200:
+            print("error inviting " + tgtuser + " to " + tgtroom)
+            print(response.json())
+            exit(1)
+
 
 if __name__ == '__main__':
     parser = createArgParser()
